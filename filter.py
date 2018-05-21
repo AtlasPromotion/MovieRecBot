@@ -264,14 +264,15 @@ def check_user_ratings(user_id):
 
 def get_film(title, genres=0):
     if(genres == 0):
-        number = movies.loc[movies['title'].str.lower() == str(title).lower()]
+        # movies.title = movies.title.astype(str).str.lower()
+        number = movies.loc[movies['title'].str.lower().str.find(str(title.lower())) != -1]
         return number
         # if(number.empty):
         #     return number
         # else:
         #     return number.iloc[0]
     else:
-        number = movies.loc[movies['title'].str.lower() == str(title).lower() ]
+        number = movies.loc[movies['title'].str.lower().str.find(str(title.lower())) != -1]
         number = number.loc[number['genres'] == genres]
         return number
 

@@ -4,18 +4,38 @@ from telebot import *
 
 bot = TeleBot("618592065:AAErIC2FWciq26gumbtJDNhAKRwmlSe1nk4")
 movie_id = 0
-page_num = 0
 rec = 0
 ratings1 = 0
 isRec = 0
 indexOfRow = 0
+message1 = 0
+genresArray = ['action', 'crime', 'thriller', 'drama','comedy','romance','horror',',mystery','sci-fi','fantasy','adventure','documentary','children','war',
+               'musical','animation']
 headers = {'Accept': 'application/json'}
 payload = {'api_key': 'd9ff9f47e912c90958ab3165c9ff713b'}
 response = requests.get("http://api.themoviedb.org/3/configuration", params=payload, headers=headers)
-# print(response.content)
 response = json.loads(response.text)
 base_url = response['images']['base_url'] + 'w185'
 
+def get_films_by_name(m):
+    movie_id = int(message1["movie_id"].iloc[int(m.text)-1])
+    url = get_poster(m.text, movie_id, base_url)
+    create_img(url)
+    img = open('out.jpg', 'rb')
+    isRec = 0
+    ratings3 = pd.read_csv('ml-latest-small/ratings.csv', sep=',', encoding='latin-1',
+                           names=['user_id', 'movie_id', 'rating', 'timestamp'])
+    ratings3 = ratings3.loc[(ratings3['movie_id'] == movie_id) & (ratings3['user_id'] == m.chat.id)]
+    if (ratings3.empty == True):
+        bot.send_photo(m.chat.id, img, caption=message1['genres'].all())
+        msg = bot.send_message(m.chat.id, 'Можешь оценить этот фильм от 1.0 до 5.0, включая дробную часть.')
+        bot.register_next_step_handler(msg, film_rate)
+    else:
+        bot.send_message(m.chat.id,
+                         '[' + message1['title'].iloc[0] + '](' + url + ')\n' + message1['genres'].iloc[
+                             0] + '\nВы оценили этот фильм на: '
+                         + str(ratings3['rating'].iloc[0]),
+                         parse_mode='Markdown')
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -39,7 +59,7 @@ def pages_keyboard(first, current, movie_id, user_id):
     if(ratings2.loc[(ratings2['movie_id']==movie_id)&(ratings2['user_id']==user_id)].empty == True):
         btns.append(types.InlineKeyboardButton(
         text='Оценить', callback_data='rec{}'.format(current-1)))
-    if current < len(ratings2):
+    if current < len(rec):
         btns.append(types.InlineKeyboardButton(
         text='➡', callback_data='to_{}'.format(current)))
     keyboard.add(*btns)
@@ -76,7 +96,10 @@ def get_my_films(message):
 
 @bot.message_handler(func=lambda m: True)
 def get_film_desc(message):
-    if(str(message.text).lower() == 'предсказывай'):
+    global message1
+    global movie_id
+    m_text = str(message.text).lower()
+    if(str(message.text).lower() == 'предсказывай' or m_text in genresArray):
         if (check_user_ratings(message.chat.id) == 0):
             bot.send_message(message.chat.id,
                              'Дорогуша, для этого тебе надо сначала оценить как минимум 10 фильмов! Осталось',
@@ -84,15 +107,15 @@ def get_film_desc(message):
         else:
             global rec
             rec = get_rec(message.chat.id)
-            global movie_id
-            global page_num
+            # if(str(message.text).lower() in genresArray):
+            #     rec = get_rec(message.chat.id,str(message.text).lower())
+            # else:
+            #     rec = get_rec(message.chat.id,0)
+            if (m_text in genresArray):
+                rec = rec.loc[rec['genres'].str.lower().str.find(m_text) != -1]
+            print(rec)
             movie_id = rec["movie_id"].iloc[0]
             url = get_poster(message.text, movie_id, base_url)
-            # f = open('out.jpg', 'wb')
-            # f.write(urllib.request.urlopen(url).read())
-            # f.close()
-            # # send_photo(message.chat.id, img, reply_to_message_id=message.message_id)
-            # img = open('out.jpg', 'rb')
             global isRec
             isRec = 1
             bot.send_message(message.chat.id,
@@ -101,33 +124,42 @@ def get_film_desc(message):
                              reply_markup=pages_keyboard(0, 1, movie_id, message.chat.id))
     else:
         message1 = get_film(message.text)
-
         if(message1.empty):
             bot.send_message(message.chat.id,
                              'Прости, такого фильма нет! Попробуй с другим названием!',
                              parse_mode='Markdown')
         else:
-            movie_id = int(message1["movie_id"].iloc[0])
-            url = get_poster(message.text, movie_id,base_url)
-            create_img(url)
-            img = open('out.jpg', 'rb')
-            isRec = 0
-            ratings3 = pd.read_csv('ml-latest-small/ratings.csv', sep=',', encoding='latin-1',
-                                   names=['user_id', 'movie_id', 'rating', 'timestamp'])
-            ratings3 = ratings3.loc[(ratings3['movie_id']==movie_id)&(ratings3['user_id']==message.chat.id)]
-            if(ratings3.empty == True):
-                bot.send_photo(message.chat.id,img,caption=message1['genres'].all())
-                msg = bot.send_message(message.chat.id,'Можешь оценить этот фильм от 1.0 до 5.0, включая дробную часть.')
-                bot.register_next_step_handler(msg, film_rate)
+            message1 = message1.reset_index(drop=True)
+            if(len(message1.index)>1):
+                text = 'Слишком много совпадений. Уточните, вы имели в виду:\n'
+                for index,row in message1.iterrows():
+                    text = text+str(index+1)+'. *'+ row['title']+'* \n'+row['genres']+'\n'
+                msg = bot.send_message(message.chat.id, text, parse_mode='Markdown')
+                bot.register_next_step_handler(msg,get_films_by_name)
             else:
-                bot.send_message(message.chat.id,
-                                 '[' + message1['title'].iloc[0] + '](' + url + ')\n' + message1['genres'].iloc[
-                                     0] + '\nВы оценили этот фильм на: '
-                                 + str(ratings3['rating'].iloc[0]),
-                                 parse_mode='Markdown')
+                movie_id = int(message1["movie_id"].iloc[0])
+                url = get_poster(message.text, movie_id,base_url)
+                create_img(url)
+                img = open('out.jpg', 'rb')
+                isRec = 0
+                ratings3 = pd.read_csv('ml-latest-small/ratings.csv', sep=',', encoding='latin-1',
+                                           names=['user_id', 'movie_id', 'rating', 'timestamp'])
+                ratings3 = ratings3.loc[(ratings3['movie_id']==movie_id)&(ratings3['user_id']==message.chat.id)]
+                if(ratings3.empty == True):
+                    bot.send_photo(message.chat.id,img,caption='*'+message1['title']+'*'+'\n'+ message1['genres'].all())
+                    msg = bot.send_message(message.chat.id,'Можешь оценить этот фильм от 1.0 до 5.0, включая дробную часть.')
+                    bot.register_next_step_handler(msg, film_rate)
+                else:
+                    bot.send_message(message.chat.id,
+                                         '[' + message1['title'].iloc[0] + '](' + url + ')\n' + message1['genres'].iloc[
+                                             0] + '\nВы оценили этот фильм на: '
+                                         + str(ratings3['rating'].iloc[0]),
+                                         parse_mode='Markdown')
 
 
 def film_rate(m):
+        if(len(m.text)==1):
+            m.text = m.text+'.0'
         if not re.match(r'[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?', m.text):
             msg = bot.send_message(m.chat.id, 'Invalid', parse_mode='Markdown')
             bot.register_next_step_handler(msg, film_rate)
@@ -195,4 +227,4 @@ def pages(c):
             message_id=c.message.message_id,
             text = '[' + rec['title'].iloc[int(c.data[3:])] + '](' + url + ')\n'+rec['genres'].iloc[int(c.data[3:])], parse_mode='Markdown',
             reply_markup=pages_keyboard(int(c.data[3:]),int(c.data[3:])+1,movie_id, c.message.chat.id))
-bot.polling()
+bot.polling(none_stop=True)
