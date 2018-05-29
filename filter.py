@@ -95,8 +95,7 @@ import urllib
 # already_rated, predictions = recommend_movies(preds, 77, movies, ratings, 20)
 # print(predictions)
 
-ratings = pd.read_csv('ml-latest-small/ratings.csv', sep=',', encoding='latin-1', names=['user_id', 'movie_id', 'rating', 'timestamp'],
-                      converters={'user_id':int,'movie_id':int,'rating':float, 'timestamp':int})
+
 # # # # Reading users file
 # # ratings = ratings.iloc[0:100000,:]
 # # users = users.iloc[0:100000,:]
@@ -118,18 +117,15 @@ def get_top_n(predictions, n=10):
     for uid, iid, true_r, est, _ in predictions:
             top_n.append([iid, est])
     dfTest = pd.DataFrame(top_n, columns = ['movie_id', 'est rating'])
-    dfTest.sort_values(by='est rating', ascending=False)
+    dfTest = dfTest.sort_values(by='est rating', ascending=False)
     # Then sort the predictions for each user and retrieve the k highest ones.
     # for user_ratings in top_n:
     #     user_ratings.sort(key=itemgetter(2))
     #     top_n = user_ratings[:n]
-
+    print (dfTest[:50])
     return dfTest[:50]
 
 def precision_recall_at_k(predictions, k=15, threshold=3.5):
-    '''Return precision and recall at k metrics for each user.'''
-
-    # First map the predictions to each user.
     user_est_true = defaultdict(list)
     for uid, _, true_r, est, _ in predictions:
         user_est_true[uid].append((est, true_r))
@@ -158,9 +154,35 @@ def precision_recall_at_k(predictions, k=15, threshold=3.5):
         recalls[uid] = n_rel_and_rec_k / n_rel if n_rel != 0 else 1
 
     return precisions, recalls
+def get_user_ratings(user_id):
+    ratings = pd.read_csv('ml-latest-small/ratings.csv', sep=',', encoding='latin-1',
+                          names=['user_id', 'movie_id', 'rating', 'timestamp'],
+                          converters={'user_id': int, 'movie_id': int, 'rating': float, 'timestamp': int})
+    number = ratings.loc[ratings['user_id'] == user_id]
+    return number
 
+def get_user_anti_ratings(user_id,genre):
+    ratings = pd.read_csv('ml-latest-small/ratings.csv', sep=',', encoding='latin-1',
+                          names=['user_id', 'movie_id', 'rating', 'timestamp'],
+                          converters={'user_id': int, 'movie_id': int, 'rating': float, 'timestamp': int})
+    number = ratings.loc[ratings['user_id'] == user_id]
+    number = number.drop(columns= ['user_id', 'rating', 'timestamp'])
+    if(genre != ''):
+        result = pd.merge(number, movies, how='inner', on=['movie_id', 'movie_id'])
+        result = result.loc[result['genres'].str.lower().str.find(genre) != -1]
+        number = result.drop(columns=['title', 'genres'])
+        movieWithGenre = movies.loc[movies['genres'].str.lower().str.find(genre) != -1]
+        movieWithGenre = movieWithGenre.drop(columns=['title', 'genres'])
+        number = pd.concat([number, movieWithGenre]).drop_duplicates(keep=False)
+        number = number.drop_duplicates(subset='movie_id')
+        result = pd.merge(number, movies, how='inner', on=['movie_id', 'movie_id'])
+        print(result)
+    else:
+        number = pd.concat([number, movies.drop(columns = ['title','genres'])]).drop_duplicates(keep=False)
+    print(number.loc[number['movie_id'] == 296])
+    number = number.drop_duplicates(subset='movie_id')
+    return number
 
-# Get base url filepath structure. w185 corresponds to size of movie poster.
 headers = {'Accept': 'application/json'}
 payload = {'api_key': 'd9ff9f47e912c90958ab3165c9ff713b'}
 response = requests.get("http://api.themoviedb.org/3/configuration", params=payload, headers=headers)
@@ -171,20 +193,13 @@ base_url = response['images']['base_url'] + 'w185'
 
 def get_poster(title, movie_id,base_url):
 
-    # Get IMDB movie ID
-    movie_id1 = links.loc[links['movie_id'] == movie_id].iloc[0]['imdb_id']
-
-    if(len(str(int(movie_id1))) == 6):
-        movie_id1 = 'tt0'+str(int(movie_id1))
-    elif(len(str(int(movie_id1))) == 5):
-        movie_id1 = 'tt00' + str(int(movie_id1))
+    movie_id = links.loc[links['movie_id'] == movie_id].iloc[0]['imdb_id']
+    if(len(str(int(movie_id))) == 6):
+        movie_id1 = 'tt0'+str(int(movie_id))
+    elif(len(str(int(movie_id))) == 5):
+        movie_id1 = 'tt00' + str(int(movie_id))
     else:
-        movie_id1 = 'tt' + str(int(movie_id1))
-    # movie_id1 = 'tt' + str(int(movie_id1))
-    # print(movie_id1)
-    # movie_id1 = 'tt0114709'
-    # print(movie_id1)
-    # Query themoviedb.org API for movie poster path.
+        movie_id1 = 'tt' + str(int(movie_id))
     movie_url = 'http://api.themoviedb.org/3/movie/{:}/images'.format(movie_id1)
     headers = {'Accept': 'application/json'}
     payload = {'api_key': 'd9ff9f47e912c90958ab3165c9ff713b'}
@@ -192,7 +207,6 @@ def get_poster(title, movie_id,base_url):
     try:
         file_path = json.loads(response.text)['posters'][0]['file_path']
     except:
-        # IMDB movie ID is sometimes no good. Need to get correct one.
         movie_title = title
         payload['query'] = movie_title
         response = requests.get('http://api.themoviedb.org/3/search/movie', params=payload, headers=headers)
@@ -204,77 +218,112 @@ def get_poster(title, movie_id,base_url):
 
     return base_url + file_path
 
+svd = SVD()
+# ratings_dict = {'itemID': list(ratings.movie_id),
+#                 'userID': list(ratings.user_id),
+#                 'rating': list(ratings.rating)}
+def get_rec(id, userAddRating, genre=''):
+    ratings = pd.read_csv('ml-latest-small/ratings.csv', sep=',', encoding='latin-1', names=['user_id', 'movie_id', 'rating', 'timestamp'],
+                          converters={'user_id':int,'movie_id':int,'rating':float, 'timestamp':int})
 
-ratings_dict = {'itemID': list(ratings.movie_id),
-                'userID': list(ratings.user_id),
-                'rating': list(ratings.rating)}
+    if(userAddRating == True):
+        df = ratings
+        reader = Reader()
+        data = Dataset.load_from_df(df[['user_id', 'movie_id', 'rating']], reader)
+        trainset = data.build_full_trainset()
+        global svd
+        svd.fit(trainset)
+        userAddRating = False
+        # userAddRating = False
+        # df = pd.DataFrame(ratings_dict)
+    # reader = Reader(rating_scale=(1, 5))
 
-df = pd.DataFrame(ratings_dict)
-reader = Reader(rating_scale=(1, 5))
-data = Dataset.load_from_df(df[['userID', 'itemID', 'rating']], reader)
-# param_grid = {'n_epochs': [5, 10], 'lr_all': [0.002, 0.005],
-#               'reg_all': [0.4, 0.6]}
-# gs = GridSearchCV(KNNBasic, param_grid, measures=['rmse', 'mae'], cv=3)
-# gs.fit(data)
-# # algo = gs.best_estimator['rmse']
-# sim_options = {'name': 'pearson_baseline',
-#                'user_based': False  # compute  similarities between items
+    # param_grid = {'n_epochs': [5, 10], 'lr_all': [0.002, 0.005],
+    #               'reg_all': [0.4, 0.6]}
+    # gs = GridSearchCV(KNNBasic, param_grid, measures=['rmse', 'mae'], cv=3)
+    # gs.fit(data)
+    # # algo = gs.best_estimator['rmse']
+    # sim_options = {'name': 'pearson_baseline',
+    #                'user_based': False  # compute  similarities between items
+    #                }
+    # algo = KNNBasic(sim_options=sim_options)
+    # # algo = SVD()
+    # kf = KFold(n_splits=5)
+    # for trainset, testset in kf.split(data):
+    #     algo.fit(trainset)
+    #     predictions = algo.test(testset)
+    #     precisions, recalls = precision_recall_at_k(predictions, k=15, threshold=3.5)
+    #
+    #     # Precision and recall can then be averaged over all users
+    #     print(sum(prec for prec in precisions.values()) / len(precisions))
+    #     print(sum(rec for rec in recalls.values()) / len(recalls))
+    # testset = trainset.build_anti_testset()
+    # data.split(n_folds=3)
+    # evaluate(svd, data, measures=['RMSE', 'MAE'])
+
+    user_rating = get_user_anti_ratings(id,genre)
+    user_rating['est rating'] = user_rating['movie_id'].apply(lambda x: svd.predict(id, x).est)
+    user_rating = user_rating.sort_values('est rating', ascending=False).reset_index()
+    result = pd.merge(user_rating, movies, how='inner', on=['movie_id', 'movie_id'])
+    return(result.sort_values(by='est rating', ascending=False).reset_index(drop=True), userAddRating)
+
+# testset = [item for item in testset if item[0] == 77]
+# testset = 0
+# sim_options = {'name': 'cosine',
+#                'user_based': True  # compute  similarities between items
 #                }
 # algo = KNNBasic(sim_options=sim_options)
-# # algo = SVD()
-# kf = KFold(n_splits=5)
-# for trainset, testset in kf.split(data):
-#     algo.fit(trainset)
-#     predictions = algo.test(testset)
-#     precisions, recalls = precision_recall_at_k(predictions, k=15, threshold=3.5)
-#
-#     # Precision and recall can then be averaged over all users
-#     print(sum(prec for prec in precisions.values()) / len(precisions))
-#     print(sum(rec for rec in recalls.values()) / len(recalls))
-trainset, testset = train_test_split(data, test_size=.3)
-# trainset = data.build_full_trainset()
-# testset = [item for item in testset if item[0] == 77]
-sim_options = {'name': 'cosine',
-               'user_based': True  # compute  similarities between items
-               }
-algo = KNNBasic(sim_options=sim_options)
 # algo = SVD()
-algo.fit(trainset)
+# algo.fit(trainset)
+# predictions = algo.test(testset)
 # testset = trainset.build_anti_testset()
-# cross_validate(algo, data, measures=['RMSE', 'MAE'], cv=5, verbose=True)
-def get_rec(id):
-    global testset
-    testset = [item for item in testset if item[0] == 77]
-    predictions = algo.test(testset)
-# print(predictions)
-    accuracy.rmse(predictions)
-    top_n = get_top_n(predictions, n=10)
-    result = pd.merge(top_n, movies, how='inner', on=['movie_id', 'movie_id'])
-    return result.sort_values(by='est rating', ascending=False).reset_index(drop=True)
+# cross_validate(algo, data, measures=['RMSE', 'MAE'], cv=2, verbose=True)
+# accuracy.rmse(predictions)
+# def get_rec(id):
+#     # user_785314 = movies.copy()
+#     # user_785314 = user_785314.reset_index()
+#     # user_785314['Estimate_Score'] = user_785314['movie_id'].apply(lambda x: algo.predict(id, x).est)
+#     # user_785314 = user_785314.drop('movie_id', axis=1)
+#     #
+#     # user_785314 = user_785314.sort_values('Estimate_Score', ascending=False)
+#     # print(user_785314.head(10))
+#     # return user_785314
+#
+#     #
+#     # forUser = df
+#     # forUser = df.reset_index()
+#     # forUser['Estimate_Score'] = df['itemID'].apply(lambda x: algo.predict(id, x))
+#     # forUser = forUser.sort_values('Estimate_Score', ascending=False)
+#     # print(forUser)
+#
+#
+#     # global testset
+#     # testset = [item for item in testset if item[0] == id]
+# #     predictions = algo.test(testset,verbose=True)
+# # # print(predictions)
+# #     accuracy.rmse(predictions)
+# #     top_n = get_top_n(predictions, n=10)
+# #     result = pd.merge(top_n, movies, how='inner', on=['movie_id', 'movie_id'])
+# #     return result.sort_values(by='est rating', ascending=False).reset_index(drop=True)
 
-# title = 'Toy Story'
-# id = 'tt0114709'
-# print(get_poster(title,id,base_url))
 def check_user_ratings(user_id):
+    ratings = pd.read_csv('ml-latest-small/ratings.csv', sep=',', encoding='latin-1',
+                          names=['user_id', 'movie_id', 'rating', 'timestamp'],
+                          converters={'user_id': int, 'movie_id': int, 'rating': float, 'timestamp': int})
     number = ratings.loc[ratings['user_id'] == user_id]
     if(number.empty):
         return 0
     else:
-        return number.count
+        return len(number)
 
-def get_film(title, genres=0):
+
+def get_films_by_name(title, genres=0):
     if(genres == 0):
-        # movies.title = movies.title.astype(str).str.lower()
-        number = movies.loc[movies['title'].str.lower().str.find(str(title.lower())) != -1]
-        return number
-        # if(number.empty):
-        #     return number
-        # else:
-        #     return number.iloc[0]
+        films = movies.loc[movies['title'].str.lower().str.find(str(title.lower())) != -1]
     else:
-        number = movies.loc[movies['title'].str.lower().str.find(str(title.lower())) != -1]
-        number = number.loc[number['genres'] == genres]
-        return number
+        films = movies.loc[movies['title'].str.lower().str.find(str(title.lower())) != -1]
+        films = films.loc[films['genres'] == genres]
+    return films
 
 def add_rate(user_id, movie_id, rate, timestamp):
     user_id = str(user_id)
@@ -285,10 +334,8 @@ def add_rate(user_id, movie_id, rate, timestamp):
     ratings = pd.read_csv('ml-latest-small/ratings.csv', sep=',', encoding='latin-1',
                           names=['user_id', 'movie_id', 'rating', 'timestamp'])
     ratings = ratings.append(ratings_user, ignore_index=True)
-    # ratings = pd.concat([ratings,ratings_user])
     ratings.to_csv('ml-latest-small/ratings.csv',header=False, index = False)
-
-    # ratings.append([[int('182060084'),int('1'),float('2.0'),int('1526731591')]], ignore_index=True)
+    return ratings_user
 
 def create_img(url):
     f = open('out.jpg', 'wb')
